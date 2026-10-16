@@ -12,6 +12,22 @@
                         <p>Form {{ $child->form_level }}</p>
                         <p>{{ $child->school_name }}</p>
                         <p>Student login: {{ $child->user->email }}</p>
+
+                        <div class="mt-4 flex flex-wrap gap-3">
+                            <a
+                                href="{{ route('parent.children.subjects', ['child' => $child->id]) }}"
+                                class="button button-secondary"
+                            >
+                                View subjects
+                            </a>
+
+                            <a
+                                href="{{ route('parent.children.timetable', ['child' => $child->id]) }}"
+                                class="button button-primary"
+                            >
+                                View timetable
+                            </a>
+                        </div>
                     </article>
                 @empty
                     <p>No children are linked to your account yet.</p>

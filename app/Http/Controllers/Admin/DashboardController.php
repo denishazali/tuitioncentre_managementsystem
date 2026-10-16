@@ -8,6 +8,7 @@ use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\Timetable;
 use App\Models\User;
+use App\Models\Package;
 use Illuminate\View\View;
 
 class DashboardController extends Controller
@@ -21,6 +22,7 @@ class DashboardController extends Controller
                 'announcements' => Announcement::count(),
                 'users' => User::count(),
                 'timetables' => Timetable::count(),
+                'packages' => Package::count(),
             ],
             'pendingUsers' => User::where(
                 'account_status',

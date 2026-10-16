@@ -10,6 +10,7 @@
 
                 @foreach ([
                     'subjects',
+                    'packages',
                     'teachers',
                     'announcements',
                     'users',

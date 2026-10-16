@@ -93,7 +93,13 @@ class ParentChildrenTest extends TestCase
         $this->actingAs($parent)->get(route('parent.children.index'))
             ->assertOk()
             ->assertViewHas('children', fn ($children) => $children->modelKeys() === [$ownChild->id])
-            ->assertViewHas('linkRequests', fn ($requests) => $requests->modelKeys() === [$ownRequest->id]);
+            ->assertViewHas('linkRequests', fn ($requests) => $requests->modelKeys() === [$ownRequest->id])
+            ->assertSee('Register a new child')
+            ->assertSee('Link an existing student')
+            ->assertSee(route('parent.children.subjects', ['child' => $ownChild->id]), false)
+            ->assertSee(route('parent.children.timetable', ['child' => $ownChild->id]), false)
+            ->assertDontSee(route('parent.children.subjects', ['child' => $otherChild->id]), false)
+            ->assertDontSee(route('parent.children.timetable', ['child' => $otherChild->id]), false);
     }
 
     public function test_link_submission_does_not_transfer_ownership_and_rejects_duplicate_pending_requests(): void

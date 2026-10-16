@@ -11,8 +11,10 @@ use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\TimetableController;
 use App\Http\Controllers\Admin\StudentLinkRequestController;
 use App\Http\Controllers\Admin\EnrollmentController as AdminEnrollmentController;
+use App\Http\Controllers\Admin\PackageController;
 use App\Http\Controllers\Parent\ChildController;
 use App\Http\Controllers\Parent\EnrollmentController;
+use App\Http\Controllers\Parent\ChildLearningController;
 use App\Http\Controllers\Student\PortalController as StudentPortalController;
 use Illuminate\Support\Facades\Route;
 
@@ -78,6 +80,9 @@ Route::middleware(['auth', 'role:admin'])
         Route::resource('timetables', TimetableController::class)
             ->except('show');
 
+        Route::resource('packages', PackageController::class)
+            ->except('show');
+
         Route::get(
             '/student-link-requests',
             [StudentLinkRequestController::class, 'index']
@@ -108,6 +113,14 @@ Route::middleware(['auth', 'role:parent'])
 
         Route::get('/children', [ChildController::class, 'index'])
             ->name('children.index');
+        
+        Route::get('/children/{child}/subjects', [ChildLearningController::class, 'subjects'])
+            ->whereNumber('child')
+            ->name('children.subjects');
+
+        Route::get('/children/{child}/timetable', [ChildLearningController::class, 'timetable'])
+            ->whereNumber('child')
+            ->name('children.timetable');
 
         Route::post('/children', [ChildController::class, 'store'])
             ->middleware('throttle:10,1')
