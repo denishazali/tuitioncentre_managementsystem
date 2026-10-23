@@ -3,20 +3,22 @@
 namespace Tests\Feature;
 
 use App\Models\Enrollment;
-use App\Models\Package;
+use App\Models\Quiz;
+use App\Models\QuizAttempt;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\User;
+use App\Services\QuizAttemptService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
-class AdminPackageTest extends TestCase
+class QuizFeatureTest extends TestCase
 {
     use RefreshDatabase;
 
     private User $admin;
-    private Subject $math;
-    private Subject $science;
+    private Student $student;
+    private Subject $subject;
 
     protected function setUp(): void
     {
@@ -27,282 +29,276 @@ class AdminPackageTest extends TestCase
             'account_status' => 'active',
         ]);
 
-        $this->math = Subject::create([
+        $this->student = $this->makeStudent();
+
+        $this->subject = Subject::create([
             'name' => 'Mathematics',
             'price' => '80.25',
             'is_active' => true,
         ]);
-
-        $this->science = Subject::create([
-            'name' => 'Science',
-            'price' => '90.50',
-            'is_active' => true,
-        ]);
     }
 
-    public function test_admin_can_create_list_edit_and_update_packages(): void
+    public function test_admin_creates_drafts_and_publishes_complete_quizzes(): void
     {
         $this->actingAs($this->admin);
 
-        $this->get(route('admin.packages.create'))
-            ->assertOk()
-            ->assertSee('Compulsory subjects')
-            ->assertSee('Elective subjects');
+        $this->get(route('admin.quizzes.create'))->assertOk();
 
-        $this->post(route('admin.packages.store'), $this->payload())
-            ->assertRedirect(route('admin.packages.index'))
+        $this->post(route('admin.quizzes.store'), $this->payload([
+            'questions' => [],
+            'is_published' => true,
+            'created_by' => 999999,
+        ]))->assertSessionHasNoErrors();
+
+        $quiz = Quiz::sole();
+
+        $this->assertFalse($quiz->is_published);
+        $this->assertSame($this->admin->id, $quiz->created_by);
+
+        $this->patch(route('admin.quizzes.publication', $quiz), [
+            'is_published' => 1,
+        ])->assertSessionHasErrors('quiz');
+
+        $this->put(route('admin.quizzes.update', $quiz), $this->payload())
             ->assertSessionHasNoErrors();
 
-        $package = Package::sole();
+        $this->patch(route('admin.quizzes.publication', $quiz), [
+            'is_published' => 1,
+        ])->assertSessionHasNoErrors();
 
-        $this->assertSame('150.00', $package->price);
+        $this->assertTrue($quiz->fresh()->is_published);
 
-        $this->assertDatabaseHas('package_subject', [
-            'package_id' => $package->id,
-            'subject_id' => $this->math->id,
-            'is_compulsory' => true,
-        ]);
+        $this->get(route('admin.quizzes.edit', $quiz))->assertOk();
 
-        $this->assertDatabaseHas('package_subject', [
-            'package_id' => $package->id,
-            'subject_id' => $this->science->id,
-            'is_compulsory' => false,
-        ]);
+        $this->delete(route('admin.quizzes.destroy', $quiz))
+            ->assertRedirect(route('admin.quizzes.index'));
 
-        $this->get(route('admin.packages.index'))
-            ->assertOk()
-            ->assertSee('Core Bundle');
-
-        $this->get(route('admin.packages.edit', $package))
-            ->assertOk()
-            ->assertViewHas('compulsoryIds', [$this->math->id])
-            ->assertViewHas('electiveIds', [$this->science->id]);
-
-        $this->put(
-            route('admin.packages.update', $package),
-            $this->payload([
-                'name' => 'Revised Bundle',
-                'price' => '160.00',
-                'compulsory_ids' => [$this->science->id],
-                'elective_ids' => [],
-                'elective_subject_limit' => 0,
-            ])
-        )
-            ->assertRedirect(route('admin.packages.index'))
-            ->assertSessionHasNoErrors();
-
-        $this->assertSame('Revised Bundle', $package->fresh()->name);
-        $this->assertSame('160.00', $package->fresh()->price);
-
-        $this->assertDatabaseMissing('package_subject', [
-            'package_id' => $package->id,
-            'subject_id' => $this->math->id,
-        ]);
-
-        $this->assertDatabaseHas('package_subject', [
-            'package_id' => $package->id,
-            'subject_id' => $this->science->id,
-            'is_compulsory' => true,
-        ]);
+        $this->assertDatabaseCount('quizzes', 0);
+        $this->assertDatabaseCount('quiz_questions', 0);
     }
 
-    public function test_invalid_package_selections_are_rejected(): void
+    public function test_start_requires_approval_publication_and_matching_form(): void
     {
-        $this->actingAs($this->admin);
+        $quiz = $this->makeQuiz();
 
-        $cases = [
-            [
-                [
-                    'compulsory_ids' => [],
-                    'elective_ids' => [],
-                    'elective_subject_limit' => 0,
-                ],
-                'compulsory_ids',
-            ],
-            [
-                ['elective_ids' => [$this->math->id]],
-                'elective_ids',
-            ],
-            [
-                ['elective_subject_limit' => 2],
-                'elective_subject_limit',
-            ],
-            [
-                [
-                    'compulsory_ids' => [],
-                    'elective_subject_limit' => 0,
-                ],
-                'elective_subject_limit',
-            ],
-            [
-                ['compulsory_ids' => [999999]],
-                'compulsory_ids.0',
-            ],
-            [
-                ['price' => '-1.00'],
-                'price',
-            ],
-            [
-                ['price' => '1.001'],
-                'price',
-            ],
-        ];
+        $this->actingAs($this->student->user);
 
-        foreach ($cases as [$overrides, $field]) {
-            $this->post(
-                route('admin.packages.store'),
-                $this->payload($overrides)
-            )->assertSessionHasErrors($field);
+        $url = route('student.quizzes.start', $quiz->id);
 
-            $this->assertDatabaseCount('packages', 0);
-            $this->assertDatabaseCount('package_subject', 0);
-        }
+        $this->post($url)->assertNotFound();
+
+        $enrollment = $this->enroll($this->student, 'pending_approval');
+
+        $enrollment->payment()->create([
+            'payment_method' => 'counter',
+            'payment_status' => 'paid',
+            'amount' => $this->subject->price,
+        ]);
+
+        $this->post($url)->assertNotFound();
+
+        $enrollment->update(['status' => 'approved']);
+        $quiz->update(['form_level' => 3]);
+
+        $this->post($url)->assertNotFound();
+
+        $quiz->update(['form_level' => 2, 'is_published' => false]);
+
+        $this->post($url)->assertNotFound();
+
+        $quiz->update(['is_published' => true]);
+        $this->subject->update(['is_active' => false]);
+
+        $this->post($url)->assertNotFound();
+
+        $this->subject->update(['is_active' => true]);
+
+        $this->post($url)->assertRedirect();
+
+        $this->assertDatabaseCount('quiz_attempts', 1);
     }
 
-    public function test_inactive_subjects_block_activation_but_allow_deactivation(): void
+    public function test_attempts_use_snapshots_and_ignore_client_scores(): void
     {
-        $package = $this->makePackage();
-        $this->math->update(['is_active' => false]);
+        $quiz = $this->makeQuiz();
+        $this->enroll($this->student);
 
-        $this->actingAs($this->admin);
+        $this->actingAs($this->student->user)
+            ->post(route('student.quizzes.start', $quiz->id))
+            ->assertRedirect();
 
-        $this->put(
-            route('admin.packages.update', $package),
-            $this->payload()
-        )->assertSessionHasErrors('is_active');
+        $attempt = QuizAttempt::sole();
+        $deadline = $attempt->expires_at->timestamp;
+        $questions = $quiz->questions;
 
-        $this->put(
-            route('admin.packages.update', $package),
-            $this->payload(['is_active' => 0])
-        )
-            ->assertRedirect(route('admin.packages.index'))
-            ->assertSessionHasNoErrors();
-
-        $this->assertFalse($package->fresh()->is_active);
-
-        $this->get(route('admin.packages.edit', $package))
+        $this->get(route('student.attempts.show', $attempt->id))
             ->assertOk()
-            ->assertSee('Mathematics (inactive)');
+            ->assertDontSee('correct_answer')
+            ->assertViewHas('questions', fn ($rows) =>
+                collect($rows)->every(
+                    fn ($row) => ! array_key_exists('correct_answer', $row)
+                )
+            );
 
-        $parent = User::factory()->create([
-            'role' => 'parent',
-            'account_status' => 'active',
-        ]);
+        $this->post(route('student.quizzes.start', $quiz->id))
+            ->assertRedirect(route('student.attempts.show', $attempt->id));
 
-        $this->actingAs($parent)
-            ->get(route('parent.enrollments.index'))
-            ->assertOk()
-            ->assertDontSee('Core Bundle');
+        $this->assertDatabaseCount('quiz_attempts', 1);
+        $this->assertSame($deadline, $attempt->fresh()->expires_at->timestamp);
+
+        // Simulate a change outside the admin interface.
+        $questions[0]->update(['correct_answer' => 'D']);
+
+        $this->post(route('student.attempts.submit', $attempt->id), [
+            'answers' => [
+                $questions[0]->id => 'A',
+                $questions[1]->id => 'B',
+            ],
+            'score' => '100.00',
+            'correct_answers' => 999,
+            'total_questions' => 1,
+        ])->assertRedirect();
+
+        $this->assertSame('50.00', $attempt->fresh()->score);
+        $this->assertSame(1, $attempt->fresh()->correct_answers);
+        $this->assertSame(2, $attempt->fresh()->total_questions);
+
+        $this->post(route('student.attempts.submit', $attempt->id), [
+            'answers' => [
+                $questions[0]->id => 'A',
+                $questions[1]->id => 'C',
+            ],
+        ])->assertRedirect();
+
+        $this->assertSame('50.00', $attempt->fresh()->score);
     }
 
-    public function test_updates_preserve_enrollment_snapshots_and_block_deletion(): void
+    public function test_expiry_grades_saved_answers_and_ignores_late_changes(): void
     {
-        $package = $this->makePackage();
+        $quiz = $this->makeQuiz();
+        $this->enroll($this->student);
 
-        $parent = User::factory()->create([
-            'role' => 'parent',
-            'account_status' => 'active',
-        ]);
+        $this->actingAs($this->student->user)
+            ->post(route('student.quizzes.start', $quiz->id));
 
-        $studentUser = User::factory()->create([
-            'role' => 'student',
-            'account_status' => 'active',
-        ]);
+        $attempt = QuizAttempt::sole();
+        $questions = $quiz->questions;
 
-        $student = Student::create([
-            'user_id' => $studentUser->id,
-            'parent_id' => $parent->id,
-            'name' => 'Test Child',
-            'ic' => 'PACKAGE-'.$studentUser->id,
-            'date_of_birth' => '2012-01-01',
-            'form_level' => 2,
-            'school_name' => 'Test School',
-        ]);
+        $this->putJson(route('student.attempts.save', $attempt->id), [
+            'answers' => [$questions[0]->id => 'A'],
+        ])
+            ->assertOk()
+            ->assertJson(['submitted' => false]);
 
-        $enrollment = Enrollment::create([
-            'student_id' => $student->id,
-            'parent_id' => $parent->id,
-            'package_id' => $package->id,
-            'type' => 'bundle',
-            'status' => 'approved',
-            'total_amount' => '150.00',
-            'submitted_at' => now(),
-            'approved_at' => now(),
-        ]);
+        $this->travel(61)->seconds();
 
-        $enrollment->subjects()->attach($this->math->id, [
-            'price_at_enrollment' => $this->math->price,
-        ]);
+        $this->post(route('student.attempts.submit', $attempt->id), [
+            'answers' => [
+                $questions[0]->id => 'A',
+                $questions[1]->id => 'C',
+            ],
+        ])->assertRedirect();
 
-        $this->actingAs($this->admin);
+        $this->assertSame('50.00', $attempt->fresh()->score);
+        $this->assertNotNull($attempt->fresh()->submitted_at);
 
-        $this->put(
-            route('admin.packages.update', $package),
-            $this->payload([
-                'price' => '180.00',
-                'compulsory_ids' => [$this->science->id],
-                'elective_ids' => [],
-                'elective_subject_limit' => 0,
-            ])
-        )
-            ->assertRedirect(route('admin.packages.index'))
-            ->assertSessionHasNoErrors();
-
-        $this->assertSame('180.00', $package->fresh()->price);
-        $this->assertSame('150.00', $enrollment->fresh()->total_amount);
-
-        $this->assertSame(
-            [$this->math->id],
-            $enrollment->subjects()->get()->modelKeys()
+        $this->assertArrayNotHasKey(
+            $questions[1]->id,
+            $attempt->fresh()->answers
         );
 
-        $this->assertDatabaseHas('enrollment_subject', [
-            'enrollment_id' => $enrollment->id,
-            'subject_id' => $this->math->id,
-            'price_at_enrollment' => '80.25',
-        ]);
-
-        $this->delete(route('admin.packages.destroy', $package))
-            ->assertSessionHasErrors('record');
-
-        $this->assertDatabaseHas('packages', ['id' => $package->id]);
+        $this->travelBack();
     }
 
-    public function test_unused_packages_can_be_deleted(): void
+    public function test_attempt_ownership_and_unknown_question_ids_are_checked(): void
     {
-        $package = $this->makePackage();
+        $quiz = $this->makeQuiz();
+        $this->enroll($this->student);
 
-        $this->actingAs($this->admin)
-            ->delete(route('admin.packages.destroy', $package))
-            ->assertRedirect(route('admin.packages.index'))
-            ->assertSessionHasNoErrors();
+        $this->actingAs($this->student->user)
+            ->post(route('student.quizzes.start', $quiz->id));
 
-        $this->assertDatabaseMissing('packages', ['id' => $package->id]);
+        $attempt = QuizAttempt::sole();
 
-        $this->assertDatabaseMissing('package_subject', [
-            'package_id' => $package->id,
-        ]);
+        $this->post(route('student.attempts.submit', $attempt->id), [
+            'answers' => [999999 => 'A'],
+        ])->assertSessionHasErrors('answers');
+
+        $this->assertNull($attempt->fresh()->submitted_at);
+
+        $other = $this->makeStudent();
+        $this->actingAs($other->user);
+
+        $this->get(route('student.attempts.show', $attempt->id))
+            ->assertNotFound();
+
+        $this->putJson(route('student.attempts.save', $attempt->id), [
+            'answers' => [],
+        ])->assertNotFound();
     }
 
-    public function test_routes_require_an_active_admin(): void
+    public function test_started_quizzes_are_locked_but_can_be_unpublished(): void
     {
-        $package = $this->makePackage();
+        $quiz = $this->makeQuiz();
+        $this->enroll($this->student);
+
+        $this->actingAs($this->student->user)
+            ->post(route('student.quizzes.start', $quiz->id));
+
+        $attempt = QuizAttempt::sole();
+
+        $this->actingAs($this->admin);
+
+        $this->put(route('admin.quizzes.update', $quiz), $this->payload([
+            'title' => 'Changed title',
+        ]))->assertSessionHasErrors('quiz');
+
+        $this->delete(route('admin.quizzes.destroy', $quiz))
+            ->assertSessionHasErrors('quiz');
+
+        $this->patch(route('admin.quizzes.publication', $quiz), [
+            'is_published' => 0,
+        ])->assertSessionHasNoErrors();
+
+        $this->assertFalse($quiz->fresh()->is_published);
+        $this->assertSame('Math quiz', $quiz->fresh()->title);
+
+        $this->actingAs($this->student->user);
+
+        $this->get(route('student.attempts.show', $attempt->id))
+            ->assertOk();
+
+        $this->post(route('student.attempts.submit', $attempt->id), [
+            'answers' => [
+                $quiz->questions[0]->id => 'A',
+                $quiz->questions[1]->id => 'C',
+            ],
+        ])->assertRedirect();
+
+        $this->assertSame('100.00', $attempt->fresh()->score);
+    }
+
+    public function test_student_routes_require_an_active_student(): void
+    {
+        $quiz = $this->makeQuiz();
+        $this->enroll($this->student);
+
+        $attempt = $this->app->make(QuizAttemptService::class)
+            ->start($this->student, $quiz->id);
 
         $requests = [
-            ['GET', route('admin.packages.index')],
-            ['GET', route('admin.packages.create')],
-            ['POST', route('admin.packages.store')],
-            ['GET', route('admin.packages.edit', $package)],
-            ['PUT', route('admin.packages.update', $package)],
-            ['DELETE', route('admin.packages.destroy', $package)],
+            ['GET', route('student.quizzes.index')],
+            ['POST', route('student.quizzes.start', $quiz->id)],
+            ['GET', route('student.attempts.show', $attempt->id)],
+            ['PUT', route('student.attempts.save', $attempt->id)],
+            ['POST', route('student.attempts.submit', $attempt->id)],
         ];
 
         foreach ($requests as [$method, $url]) {
-            $this->call($method, $url)
-                ->assertRedirect(route('login'));
+            $this->call($method, $url)->assertRedirect(route('login'));
         }
 
-        foreach (['parent', 'student'] as $role) {
+        foreach (['parent', 'admin'] as $role) {
             $this->actingAs(User::factory()->create([
                 'role' => $role,
                 'account_status' => 'active',
@@ -313,40 +309,100 @@ class AdminPackageTest extends TestCase
             }
         }
 
-        $this->admin->update(['account_status' => 'inactive']);
-        $this->actingAs($this->admin->fresh());
+        $this->student->user->update(['account_status' => 'inactive']);
+        $this->actingAs($this->student->user->fresh());
 
         foreach ($requests as [$method, $url]) {
             $this->call($method, $url)->assertForbidden();
         }
     }
 
+    private function makeStudent(): Student
+    {
+        $parent = User::factory()->create([
+            'role' => 'parent',
+            'account_status' => 'active',
+        ]);
+
+        $user = User::factory()->create([
+            'role' => 'student',
+            'account_status' => 'active',
+        ]);
+
+        return Student::create([
+            'user_id' => $user->id,
+            'parent_id' => $parent->id,
+            'name' => 'Student '.$user->id,
+            'ic' => 'QUIZ-'.$user->id,
+            'date_of_birth' => '2012-01-01',
+            'form_level' => 2,
+            'school_name' => 'Test School',
+        ]);
+    }
+
+    private function enroll(
+        Student $student,
+        string $status = 'approved'
+    ): Enrollment {
+        $enrollment = Enrollment::create([
+            'student_id' => $student->id,
+            'parent_id' => $student->parent_id,
+            'type' => 'individual',
+            'status' => $status,
+            'total_amount' => $this->subject->price,
+        ]);
+
+        $enrollment->subjects()->attach($this->subject->id, [
+            'price_at_enrollment' => $this->subject->price,
+        ]);
+
+        return $enrollment;
+    }
+
     private function payload(array $overrides = []): array
     {
         return array_replace([
-            'name' => 'Core Bundle',
-            'price' => '150.00',
-            'elective_subject_limit' => 1,
-            'is_active' => 1,
-            'compulsory_ids' => [$this->math->id],
-            'elective_ids' => [$this->science->id],
+            'title' => 'Math quiz',
+            'description' => 'Practice questions',
+            'subject_id' => $this->subject->id,
+            'form_level' => 2,
+            'time_limit_minutes' => 1,
+            'questions' => [
+                [
+                    'question' => 'What is 2 + 2?',
+                    'option_a' => '4',
+                    'option_b' => '3',
+                    'option_c' => '2',
+                    'option_d' => '1',
+                    'correct_answer' => 'A',
+                ],
+                [
+                    'question' => 'What is 3 + 3?',
+                    'option_a' => '4',
+                    'option_b' => '5',
+                    'option_c' => '6',
+                    'option_d' => '7',
+                    'correct_answer' => 'C',
+                ],
+            ],
         ], $overrides);
     }
 
-    private function makePackage(): Package
+    private function makeQuiz(): Quiz
     {
-        $package = Package::create([
-            'name' => 'Core Bundle',
-            'price' => '150.00',
-            'elective_subject_limit' => 1,
-            'is_active' => true,
+        $data = $this->payload();
+        $questions = $data['questions'];
+
+        unset($data['questions']);
+
+        $quiz = Quiz::create([
+            ...$data,
+            'created_by' => $this->admin->id,
+            'is_published' => true,
         ]);
 
-        $package->subjects()->attach([
-            $this->math->id => ['is_compulsory' => true],
-            $this->science->id => ['is_compulsory' => false],
-        ]);
+        $quiz->questions()->createMany($questions);
 
-        return $package;
+        return $quiz->load('questions');
     }
 }

@@ -7,11 +7,11 @@ use App\Models\Subject;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\validationException;
+use Illuminate\Validation\ValidationException;
 
 class PackageController extends AdminController
 {
-    protected string $module = 'package';
+    protected string $module = 'packages';
 
     protected array $columns = [
         'name' => 'Package',
@@ -74,12 +74,12 @@ class PackageController extends AdminController
         DB::transaction(function () use ($package) {
             $record = Package::query()
             ->lockForUpdate()
-            ->findorFail($package->id);
+            ->findOrFail($package->id);
 
             $this->ensure(
                 ! $record->enrollments()->exists(),
                 'record',
-                'This package has enrollment history. Deactivate it instaed.'
+                'This package has enrollment history. Deactivate it instead.'
             );
 
             $record->delete();
@@ -102,6 +102,11 @@ class PackageController extends AdminController
                 ->all(),
 
             'compulsoryIds' => $selected
+            ->where('pivot.is_compulsory', true)
+            ->pluck('id')
+            ->all(),
+
+            'electiveIds' => $selected
             ->where('pivot.is_compulsory', false)
             ->pluck('id')
             ->all(),
@@ -177,7 +182,7 @@ class PackageController extends AdminController
         $this->ensure(
             $limit <= $electives->count(),
             'elective_subject_limit',
-            'The elective limit cannot exceed the number of elective subjects..'
+            'The elective limit cannot exceed the number of elective subjects.'
         );
 
         $this->ensure(
@@ -195,14 +200,14 @@ class PackageController extends AdminController
             'Remove inactive subjects before activating this package.'
         );
 
-        $subject = [];
+        $subjects = [];
 
         foreach ($compulsory as $id) {
             $subjects[$id] = ['is_compulsory' => true];
         }
 
         foreach ($electives as $id) {
-            $subject[$id] = ['is_compulsory => false'];
+            $subjects[$id] = ['is_compulsory' => false];
         }
 
         unset($data['compulsory_ids'], $data['elective_ids']);

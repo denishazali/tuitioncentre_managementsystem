@@ -9,10 +9,9 @@
                     'student.dashboard' => 'Dashboard',
                     'student.subjects.index' => 'My Subjects',
                     'student.timetable.index' => 'My Timetable',
+                    'student.quizzes.index' => 'Quizzes',
                 ] as $routeName => $label)
-                    <a
-                        href="{{ route($routeName) }}"
-                        class="button button-secondary"
+                    <a href="{{ route($routeName) }}" class="button button-secondary"
                         @if (request()->routeIs($routeName))
                             aria-current="page"
                         @endif

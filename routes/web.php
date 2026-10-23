@@ -11,11 +11,13 @@ use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\TimetableController;
 use App\Http\Controllers\Admin\StudentLinkRequestController;
 use App\Http\Controllers\Admin\EnrollmentController as AdminEnrollmentController;
+use App\Http\Controllers\Admin\QuizController as AdminQuizController;
 use App\Http\Controllers\Admin\PackageController;
 use App\Http\Controllers\Parent\ChildController;
 use App\Http\Controllers\Parent\EnrollmentController;
 use App\Http\Controllers\Parent\ChildLearningController;
 use App\Http\Controllers\Student\PortalController as StudentPortalController;
+use App\Http\Controllers\Student\QuizController as StudentQuizController;
 use Illuminate\Support\Facades\Route;
 
 /* Public pages */
@@ -35,7 +37,6 @@ Route::post('/feedback', [PublicFeedbackController::class, 'store'])
     ->middleware('throttle:5,1')
     ->name('public.feedback.store');
 
-/* Public pages */
 Route::middleware('guest')->group(function () {
     Route::get('/login', [AuthController::class, 'showLogin'])
         ->name('login');
@@ -83,25 +84,23 @@ Route::middleware(['auth', 'role:admin'])
         Route::resource('packages', PackageController::class)
             ->except('show');
 
-        Route::get(
-            '/student-link-requests',
-            [StudentLinkRequestController::class, 'index']
-        )->name('student-link-requests.index');
+        Route::resource('quizzes', AdminQuizController::class)
+            ->except('show');
 
-        Route::patch(
-            '/student-link-requests/{linkRequest}/approve',
-            [StudentLinkRequestController::class, 'approve']
-        )->name('student-link-requests.approve');
+        Route::get('/student-link-requests', [StudentLinkRequestController::class, 'index'])
+            ->name('student-link-requests.index');
 
-        Route::patch(
-            '/student-link-requests/{linkRequest}/reject',
-            [StudentLinkRequestController::class, 'reject']
-        )->name('student-link-requests.reject');
+        Route::patch('/student-link-requests/{linkRequest}/approve', [StudentLinkRequestController::class, 'approve'])
+            ->name('student-link-requests.approve');
 
-        Route::patch(
-            '/enrollments/{enrollment}',
-            [AdminEnrollmentController::class, 'update']
-        )->name('enrollments.update');
+        Route::patch('/student-link-requests/{linkRequest}/reject', [StudentLinkRequestController::class, 'reject'])
+            ->name('student-link-requests.reject');
+
+        Route::patch('/enrollments/{enrollment}', [AdminEnrollmentController::class, 'update'])
+            ->name('enrollments.update');
+
+        Route::patch('/quizzes/{quiz}/publication', [AdminQuizController::class, 'publication'])
+            ->name('quizzes.publication');
     });
 
 Route::middleware(['auth', 'role:parent'])
@@ -127,13 +126,10 @@ Route::middleware(['auth', 'role:parent'])
             ->name('children.store');
 
         Route::post('/enrollments', [EnrollmentController::class, 'store'])
-        ->middleware('throttle:10,1')
-        ->name('enrollments.store');
+            ->middleware('throttle:10,1')
+            ->name('enrollments.store');
 
-        Route::post(
-            '/student-link-requests',
-            [ChildController::class, 'requestLink']
-        )
+        Route::post('/student-link-requests',[ChildController::class, 'requestLink'])
             ->middleware('throttle:5,1')
             ->name('student-link-requests.store');
 
@@ -149,7 +145,7 @@ Route::middleware(['auth', 'role:parent'])
         Route::post('/enrollments/preview', [EnrollmentController::class, 'preview'])
             ->middleware('throttle:20,1')
             ->name('enrollments.preview');
-            });
+    });
 
 Route::middleware(['auth', 'role:student'])
     ->prefix('student')
@@ -163,4 +159,26 @@ Route::middleware(['auth', 'role:student'])
 
         Route::get('/timetable', [StudentPortalController::class, 'timetable'])
             ->name('timetable.index');
+
+        Route::get('/quizzes', [StudentQuizController::class,'index'])
+            ->name('quizzes.index');
+
+        Route::post('/quizzes/{quiz}/start', [StudentQuizController::class, 'start'])
+            ->whereNumber('quiz')
+            ->middleware('throttle:10,1,quiz-start:')
+            ->name('quizzes.start');
+
+        Route::get('/quiz-attempts/{attempt}', [StudentQuizController::class, 'show'])
+            ->whereNumber('attempt')
+            ->name('attempts.show');
+
+        Route::put('/quiz-attempts/{attempt}/answers', [StudentQuizController::class, 'save'])
+            ->whereNumber('attempt')
+            ->middleware('throttle:120,1,quiz-save:')
+            ->name('attempts.save');
+
+        Route::post('/quiz-attempts/{attempt}/submit', [StudentQuizController::class, 'submit'])
+            ->whereNumber('attempt')
+            ->middleware('throttle:10,1,quiz-submit:')
+            ->name('attempts.submit');
     });

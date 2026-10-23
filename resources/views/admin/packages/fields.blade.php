@@ -14,7 +14,7 @@
 
 <x-admin-field name="compulsory_ids" label="Compulsory subjects" type="select" :options="$subjectOptions" :value="$compulsoryIds" multiple/>
 
-<x-admin-field name="elective_ids" label="Elective subjects" type="select" :options="$subjectOptions" :value="electiveIds" multiple/>
+<x-admin-field name="elective_ids" label="Elective subjects" type="select" :options="$subjectOptions" :value="$electiveIds" multiple/>
 
 <p class="text-sm text-gray-600">
     Hold Ctrl on windows or Command on Mac to select multiple subjects.

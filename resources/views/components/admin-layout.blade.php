@@ -16,6 +16,7 @@
                     'users',
                     'timetables',
                     'enrollments',
+                    'quizzes'
                 ] as $module)
                     <a 
                         href="{{ route('admin.' . $module . '.index') }}" 
